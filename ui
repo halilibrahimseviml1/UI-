@@ -1,1 +1,1723 @@
-tesy
+local MarketplaceService = game:GetService("MarketplaceService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local PlayerMouse = Player:GetMouse()
+
+-- ✅ SARILI / ALTIN TEMA (değiştirildi)
+local DEFAULT_THEME_TEMPLATE = {
+    ["Color Hub 1"] = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Color3.fromRGB(20, 17, 9)),
+        ColorSequenceKeypoint.new(0.50, Color3.fromRGB(48, 40, 20)),
+        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(20, 17, 9))
+    }),
+    ["Color Hub 2"] = Color3.fromRGB(38, 32, 18),
+    ["Color Stroke"] = Color3.fromRGB(16, 13, 7),
+    ["Color Theme"] = Color3.fromRGB(255, 200, 50),
+    ["Color Text"] = Color3.fromRGB(245, 238, 215),
+    ["Color Dark Text"] = Color3.fromRGB(190, 172, 130)
+}
+
+local function cloneDefaultTheme()
+    return {
+        ["Color Hub 1"] = DEFAULT_THEME_TEMPLATE["Color Hub 1"],
+        ["Color Hub 2"] = DEFAULT_THEME_TEMPLATE["Color Hub 2"],
+        ["Color Stroke"] = DEFAULT_THEME_TEMPLATE["Color Stroke"],
+        ["Color Theme"] = DEFAULT_THEME_TEMPLATE["Color Theme"],
+        ["Color Text"] = DEFAULT_THEME_TEMPLATE["Color Text"],
+        ["Color Dark Text"] = DEFAULT_THEME_TEMPLATE["Color Dark Text"]
+    }
+end
+
+local function safeHttpGet(url)
+    local ok, result = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and type(result) == "string" and result ~= "" then
+        return result
+    end
+    return nil
+end
+
+local function safeLoadRemoteTable(url, fallback)
+    local source = safeHttpGet(url)
+    if type(source) ~= "string" then
+        return fallback
+    end
+
+    local okChunk, chunk = pcall(loadstring, source)
+    if not okChunk or type(chunk) ~= "function" then
+        return fallback
+    end
+
+    local okData, data = pcall(chunk)
+    if okData and type(data) == "table" then
+        return data
+    end
+    return fallback
+end
+
+local function normalizeThemes(themeTable)
+    local normalized = {}
+
+    if type(themeTable) == "table" then
+        for themeName, themeData in pairs(themeTable) do
+            if type(themeName) == "string" and type(themeData) == "table" then
+                local theme = cloneDefaultTheme()
+                for key, value in pairs(themeData) do
+                    theme[key] = value
+                end
+                normalized[themeName] = theme
+            end
+        end
+    end
+
+    -- ✅ Fallback Gold
+    if next(normalized) == nil then
+        normalized.Gold = cloneDefaultTheme()
+    elseif type(normalized.Gold) ~= "table" then
+        normalized.Gold = cloneDefaultTheme()
+    end
+
+    return normalized
+end
+
+local function normalizeIcons(iconTable)
+    if type(iconTable) ~= "table" then
+        return {}
+    end
+    return iconTable
+end
+
+local function safeIsFile(path)
+    if type(isfile) ~= "function" then return false end
+    local ok, result = pcall(isfile, path)
+    return ok and result == true
+end
+
+local function safeReadFile(path)
+    if type(readfile) ~= "function" then return nil end
+    local ok, result = pcall(readfile, path)
+    if ok and type(result) == "string" then return result end
+    return nil
+end
+
+local function safeWriteFile(path, content)
+    if type(writefile) ~= "function" then return false end
+    return pcall(writefile, path, content)
+end
+
+local function safeIsFolder(path)
+    if type(isfolder) ~= "function" then return false end
+    local ok, result = pcall(isfolder, path)
+    return ok and result == true
+end
+
+local function safeMakeFolder(path)
+    if type(makefolder) ~= "function" then return false end
+    return pcall(makefolder, path)
+end
+
+local function safeJSONDecode(content, fallback)
+    if type(content) ~= "string" or content == "" then return fallback end
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(content)
+    end)
+    if ok and type(decoded) == "table" then return decoded end
+    return fallback
+end
+
+local function safeJSONEncode(data, fallback)
+    local ok, encoded = pcall(function()
+        return HttpService:JSONEncode(data)
+    end)
+    if ok and type(encoded) == "string" then return encoded end
+    return fallback or "{}"
+end
+
+local function safeReadJsonFile(path, fallback)
+    local raw = safeReadFile(path)
+    return safeJSONDecode(raw, fallback)
+end
+
+local function safeWriteJsonFile(path, data)
+    return safeWriteFile(path, safeJSONEncode(data, "{}"))
+end
+
+local loadedThemes = safeLoadRemoteTable("https://raw.githubusercontent.com/as6cd0/splibv2/main/Themes.lua", {})
+local loadedIcons = safeLoadRemoteTable("https://raw.githubusercontent.com/as6cd0/splibv2/main/Icons.lua", {})
+
+local splib = {
+    IsPremium = false,
+    FlagsEnabled = true,
+    Themes = normalizeThemes(loadedThemes),
+    Info = {
+        Version = "1.3.0"
+    },
+    Save = {
+        UISize = {550, 380},
+        TabSize = 160,
+        Theme = "Gold",   -- ✅ Red -> Gold
+        LayoutMode = "Classic"
+    },
+    Settings = {},
+    Connection = {},
+    Instances = {},
+    Elements = {},
+    Options = {},
+    Flags = {},
+    PremiumElements = {},
+    Tabs = {},
+    Icons = normalizeIcons(loadedIcons)
+}
+
+-- ✅ SARILI TEMAYI ZORLA (uzaktaki "Gold" varsa bile bizimki kullanılır)
+splib.Themes.Gold = cloneDefaultTheme()
+
+splib._PremiumChanged = Instance.new("BindableEvent")
+function splib:RegisterPremiumElement(instance)
+    if not instance then return end
+    table.insert(self.PremiumElements, instance)
+end
+
+local function ApplyPremiumVisual(self)
+    for _, inst in ipairs(self.PremiumElements) do
+        pcall(function()
+            if typeof(inst) == "Instance" then
+                if inst:IsA("GuiObject") then
+                    inst.Visible = self.IsPremium
+                else
+                    if inst.Parent and not self.IsPremium then
+                        inst._saved_parent = inst.Parent
+                        inst.Parent = nil
+                    elseif inst._saved_parent and self.IsPremium then
+                        inst.Parent = inst._saved_parent
+                        inst._saved_parent = nil
+                    end
+                end
+            end
+        end)
+    end
+end
+
+function splib:SetPremium(state)
+    state = state and true or false
+    if self.IsPremium == state then return end
+    self.IsPremium = state
+    safeWriteFile("splib_premium.dat", state and "1" or "0")
+    ApplyPremiumVisual(self)
+    self._PremiumChanged:Fire(state)
+end
+
+function splib:LoadPremium()
+    local data = safeReadFile("splib_premium.dat")
+    self.IsPremium = (data == "1") and true or false
+    ApplyPremiumVisual(self)
+end
+
+-- ok this is redz lib v5 but now its for sp cuz its has edited in full! and  big improvent and added more functions by sp to contact the the dev discord @nadermohamed22
+local Binds = {}
+local BindSaveKeyCounts = {}
+local BindBoxAnimationsReady = false
+local BindBoxAnimationToken = 0
+local BindBoxRefreshers = setmetatable({}, {__mode = "k"})
+local ScreenGui
+splib.SearchElements = {}
+
+local function resetBindBoxAnimations(waitTime)
+    BindBoxAnimationToken += 1
+    local token = BindBoxAnimationToken
+    BindBoxAnimationsReady = false
+    task.defer(function()
+        task.wait(tonumber(waitTime) or 0.85)
+        if token == BindBoxAnimationToken then
+            for bindBox, refresher in pairs(BindBoxRefreshers) do
+                if bindBox and bindBox.Parent and type(refresher) == "function" then
+                    pcall(refresher, false, true)
+                end
+            end
+            BindBoxAnimationsReady = true
+        end
+    end)
+end
+
+local function getCurrentSearchSection(tab, container)
+    if tab and container and tab.CurrentSectionFrames then
+        return tab.CurrentSectionFrames[container]
+    end
+    return tab and tab.CurrentSectionFrame
+end
+
+local function registerSearchElement(tab, name, frame, sectionFrame, elementType, searchProvider, searchAction)
+    if not name or name == "" or not frame then return end
+    if frame.Parent and (frame.Parent.Name == "SettingsTab" or frame.Parent.Name:find("Settings")) then
+        return
+    end
+    table.insert(splib.SearchElements, {
+        Name = tostring(name),
+        Tab = tab,
+        Frame = frame,
+        SectionFrame = sectionFrame,
+        Type = elementType or "Element",
+        SearchProvider = type(searchProvider) == "function" and searchProvider or nil,
+        SearchAction = type(searchAction) == "function" and searchAction or nil
+    })
+end
+
+local function isMouseInside(guiObject)
+	local inside = false
+	pcall(function()
+		if guiObject and guiObject.Parent and guiObject.AbsolutePosition and guiObject.AbsoluteSize then
+			local mousePos = UserInputService:GetMouseLocation()
+			local inset = game:GetService("GuiService"):GetGuiInset()
+			local mouseX, mouseY = mousePos.X, mousePos.Y
+			local ap = guiObject.AbsolutePosition
+			local as = guiObject.AbsoluteSize
+			local realMouseX = mouseX
+			local realMouseY = mouseY
+			local ignoreInset = false
+			if ScreenGui then
+				ignoreInset = ScreenGui.IgnoreGuiInset
+			end
+			if not ignoreInset then
+				realMouseY = realMouseY - inset.Y
+				realMouseX = realMouseX - inset.X
+			end
+			inside = realMouseX >= ap.X and realMouseX <= (ap.X + as.X) and realMouseY >= ap.Y and realMouseY <= (ap.Y + as.Y)
+		end
+	end)
+	return inside
+end
+_G.spLibToggles = _G.spLibToggles or {}
+local Toggles = _G.spLibToggles
+
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local isPC = not UserInputService.TouchEnabled and UserInputService.KeyboardEnabled
+
+local ViewportSize = workspace.CurrentCamera.ViewportSize
+local UIScale = isPC and ViewportSize.Y / 550 or ViewportSize.Y / 425
+
+local Settings = splib.Settings
+local Flags = splib.Flags
+
+local SettingsFile = "sp library.json"
+local LoadedToggles = safeReadJsonFile(SettingsFile, {}) or {}
+
+local DropdownsFile = "dropdowns.json"
+local LoadedDropdowns = safeReadJsonFile(DropdownsFile, {}) or {}
+
+local function SaveCfg(filename)
+    local data = {}
+    for flag, obj in pairs(splib.Flags) do
+        if obj.Save then
+            data[flag] = obj.Value
+        end
+    end
+    safeWriteJsonFile(filename .. ".json", data)
+end
+
+local function LoadCfg(filename)
+    local data = safeReadJsonFile(filename .. ".json", nil)
+    if type(data) == "table" then
+        for flag, value in pairs(data) do
+            local obj = splib.Flags[flag]
+            if obj and obj.Set then
+                obj:Set(value)
+                obj.Value = value
+            end
+        end
+    end
+end
+
+LoadCfg("sp library")
+
+local SetProps, SetChildren, InsertTheme, Create do
+	InsertTheme = function(Instance, Type)
+		table.insert(splib.Instances, { Instance = Instance, Type = Type })
+		return Instance
+	end
+	SetChildren = function(Instance, Children)
+		if Children then
+			table.foreach(Children, function(_,Child) Child.Parent = Instance end)
+		end
+		return Instance
+	end
+	SetProps = function(Instance, Props)
+		if Props then
+			table.foreach(Props, function(prop, value) Instance[prop] = value end)
+		end
+		return Instance
+	end
+	Create = function(...)
+		local args = {...}
+		if type(args) ~= "table" then return end
+		local new = Instance.new(args[1])
+		local Children = {}
+		if type(args[2]) == "table" then
+			SetProps(new, args[2])
+			SetChildren(new, args[3])
+			Children = args[3] or {}
+		elseif typeof(args[2]) == "Instance" then
+			new.Parent = args[2]
+			SetProps(new, args[3])
+			SetChildren(new, args[4])
+			Children = args[4] or {}
+		end
+		return new
+	end
+	
+	local function Save(file)
+		local decode = safeReadJsonFile(file, nil)
+		if type(decode) == "table" then
+			if rawget(decode, "UISize") and type(decode["UISize"]) == "table" then
+				splib.Save["UISize"] = decode["UISize"]
+			end
+			if rawget(decode, "TabSize") and type(decode["TabSize"]) == "number" then
+				splib.Save["TabSize"] = decode["TabSize"]
+			end
+			if rawget(decode, "Theme") and type(decode["Theme"]) == "string" and splib.Themes[decode["Theme"]] then
+				splib.Save["Theme"] = decode["Theme"]
+			end
+			if rawget(decode, "LayoutMode") and (decode["LayoutMode"] == "Classic" or decode["LayoutMode"] == "Grid") then
+				splib.Save["LayoutMode"] = decode["LayoutMode"]
+			end
+		end
+	end
+	pcall(Save, "sp library.json")
+end
+
+local Funcs = {} do
+	function Funcs:InsertCallback(tab, func)
+		if type(func) == "function" then table.insert(tab, func) end
+		return func
+	end
+	
+	function Funcs:FireCallback(tab, ...)
+		for _, v in ipairs(tab) do
+			if type(v) == "function" then task.spawn(v, ...) end
+		end
+	end
+	
+	function Funcs:ToggleVisible(Obj, Bool)
+		Obj.Visible = (Bool ~= nil) and Bool or Obj.Visible
+	end
+	
+	function Funcs:ToggleParent(Obj, Parent, Bool)
+		if Bool ~= nil then
+			if Bool then Obj.Parent = Parent else Obj.Parent = nil end
+		else
+			Obj.Parent = Obj.Parent and nil or Parent
+		end
+	end
+	
+	function Funcs:GetConnectionFunctions(ConnectedFuncs, func)
+		local Connected = { Function = func, Connected = true }
+		function Connected:Disconnect()
+			if self.Connected then
+				table.remove(ConnectedFuncs, table.find(ConnectedFuncs, self.Function))
+				self.Connected = false
+			end
+		end
+		function Connected:Fire(...)
+			if self.Connected then task.spawn(self.Function, ...) end
+		end
+		return Connected
+	end
+	
+	function Funcs:GetCallback(Configs, index)
+		local func = Configs[index] or Configs.Callback or function() end
+		if type(func) == "table" then
+			return ({function(Value) func[1][func[2]] = Value end})
+		end
+		return {func}
+	end
+end
+
+local Connections, Connection = {}, splib.Connection do
+	local function NewConnectionList(List)
+		if type(List) ~= "table" then return end
+		for _,CoName in ipairs(List) do
+			local ConnectedFuncs, Connect = {}, {}
+			Connection[CoName] = Connect
+			Connections[CoName] = ConnectedFuncs
+			Connect.Name = CoName
+			function Connect:Connect(func)
+				if type(func) == "function" then
+					table.insert(ConnectedFuncs, func)
+					return Funcs:GetConnectionFunctions(ConnectedFuncs, func)
+				end
+			end
+			function Connect:Once(func)
+				if type(func) == "function" then
+					local Connected
+					local _NFunc;_NFunc = function(...)
+						task.spawn(func, ...)
+						Connected:Disconnect()
+					end
+					Connected = Funcs:GetConnectionFunctions(ConnectedFuncs, _NFunc)
+					return Connected
+				end
+			end
+		end
+	end
+	function Connection:FireConnection(CoName, ...)
+		local Connection = type(CoName) == "string" and Connections[CoName] or Connections[CoName.Name]
+		for _,Func in pairs(Connection) do task.spawn(Func, ...) end
+	end
+	NewConnectionList({"FlagsChanged", "ThemeChanged", "FileSaved", "ThemeChanging", "OptionAdded"})
+end
+
+local GetFlag, SetFlag, CheckFlag do
+	CheckFlag = function(Name)
+		return type(Name) == "string" and Flags[Name] ~= nil
+	end
+	GetFlag = function(Name)
+		return type(Name) == "string" and Flags[Name]
+	end
+	SetFlag = function(Flag, Value)
+		if Flag and (Value ~= Flags[Flag] or type(Value) == "table") then
+			Flags[Flag] = Value
+			Connection:FireConnection("FlagsChanged", Flag, Value)
+		end
+	end
+	local db
+	Connection.FlagsChanged:Connect(function(Flag, Value)
+		local ScriptFile = Settings.ScriptFile
+		if not db and type(ScriptFile) == "string" then
+			db=true;task.wait(0.1);db=false
+			local Encoded = safeJSONEncode(Flags, "{}")
+			local Success = safeWriteFile(ScriptFile, Encoded)
+			if Success then
+				Connection:FireConnection("FileSaved", "Script-Flags", ScriptFile, Encoded)
+			end
+		end
+	end)
+end
+
+local saved = safeReadJsonFile("sp library.json", {}) or {}
+local DEFAULT_OPEN_UI_SIZE = {420, 300}
+local UI_SIZE_SAVE_VERSION = 2
+local function isValidSavedUISize(value)
+    return type(value) == "table" and type(value[1]) == "number" and type(value[2]) == "number" and value[1] >= 300 and value[2] >= 220
+end
+local function copyUISize(value)
+    return {math.floor(value[1] + 0.5), math.floor(value[2] + 0.5)}
+end
+local loadedInternalFlags = safeReadJsonFile("sp lib v2.json", {}) or {}
+local saveUISizeEnabled = loadedInternalFlags.SaveUISize
+if type(saveUISizeEnabled) ~= "boolean" then saveUISizeEnabled = true end
+local loadedUISize = isValidSavedUISize(saved.UISize) and copyUISize(saved.UISize) or nil
+if loadedUISize and saved.UISizeVersion ~= UI_SIZE_SAVE_VERSION and loadedUISize[1] == 550 and loadedUISize[2] == 380 then
+    loadedUISize = nil
+end
+splib.Settings.SaveUISize = saveUISizeEnabled
+splib.Settings.UseSavedUISize = saveUISizeEnabled and loadedUISize ~= nil
+splib.Save = {
+  UISize  = loadedUISize or copyUISize(DEFAULT_OPEN_UI_SIZE),
+  UISizeVersion = saved.UISizeVersion,
+  TabSize = type(saved.TabSize) == "number" and saved.TabSize or splib.Save.TabSize,
+  -- ✅ Gold fallback
+  Theme   = (type(saved.Theme) == "string" and splib.Themes[saved.Theme]) and saved.Theme or "Gold",
+  LayoutMode = saved.LayoutMode == "Grid" and "Grid" or "Classic",
+  SelectedFont = (type(saved.SelectedFont) == "string") and saved.SelectedFont or "Default",
+  FontSizeOffset = type(saved.FontSizeOffset) == "number" and saved.FontSizeOffset or 0,
+}
+
+_G.spLibConnections = _G.spLibConnections or {}
+local bindConnections = _G.spLibConnections
+local shouldClearToggles = false
+local isLibraryDestroyed = false
+
+local function trackRuntimeConnection(connection)
+    if typeof(connection) == "RBXScriptConnection" then
+        table.insert(bindConnections, connection)
+    end
+    return connection
+end
+
+local function isLibraryAlive() return not isLibraryDestroyed end
+
+local function isTextInputFocused()
+    local ok, focusedTextBox = pcall(function()
+        return UserInputService:GetFocusedTextBox()
+    end)
+    return ok and focusedTextBox ~= nil
+end
+
+local bindDispatcherBegan
+local bindDispatcherEnded
+local function ensureBindDispatcher()
+    if bindDispatcherBegan and bindDispatcherBegan.Connected and bindDispatcherEnded and bindDispatcherEnded.Connected then
+        return
+    end
+    if not (bindDispatcherBegan and bindDispatcherBegan.Connected) then
+        bindDispatcherBegan = trackRuntimeConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if isTextInputFocused() then return end
+            for i = #Binds, 1, -1 do
+                local bind = Binds[i]
+                if bind and type(bind._HandleInputBegan) == "function" then
+                    bind:_HandleInputBegan(input, gameProcessed)
+                end
+            end
+        end))
+    end
+    if not (bindDispatcherEnded and bindDispatcherEnded.Connected) then
+        bindDispatcherEnded = trackRuntimeConnection(UserInputService.InputEnded:Connect(function(input, gameProcessed)
+            for i = #Binds, 1, -1 do
+                local bind = Binds[i]
+                if bind and type(bind._HandleInputEnded) == "function" then
+                    bind:_HandleInputEnded(input, gameProcessed)
+                end
+            end
+        end))
+    end
+end
+
+local GUI_NAME = "sp Library"
+local oldGui = CoreGui:FindFirstChild(GUI_NAME)
+if oldGui then
+    if _G.spLibConnections then
+        for _, conn in ipairs(_G.spLibConnections) do
+            if typeof(conn) == "RBXScriptConnection" and conn.Connected then
+                conn:Disconnect()
+			end
+		end
+        table.clear(_G.spLibConnections)
+    end
+    if _G.spLibToggles then
+        for _, entry in ipairs(_G.spLibToggles) do
+            if entry.object and type(entry.object.ForceCallback) == "function" then
+                entry.object:ForceCallback(false)
+            end
+        end
+        table.clear(_G.spLibToggles)
+    end
+    oldGui:Destroy()
+end
+
+local oldTooltipLayer = CoreGui:FindFirstChild("SPGridTooltipLayer")
+if oldTooltipLayer then oldTooltipLayer:Destroy() end
+
+ScreenGui = Create("ScreenGui", CoreGui, {
+    Name = GUI_NAME,
+    ZIndexBehavior = Enum.ZIndexBehavior.Global,
+}, {
+    Create("UIScale", { Scale = UIScale, Name = "Scale" })
+})
+
+-- UI Font Handler
+local originalFonts = {}
+local originalTextSizes = {}
+local originalLineHeights = {}
+local fontMap = { ["Default"] = "Default" }
+pcall(function() fontMap["Tajawal (Arabic)"] = Font.new("rbxassetid://12187377588") end)
+pcall(function() fontMap["Gotham"] = Font.fromEnum(Enum.Font.Gotham) end)
+pcall(function() fontMap["Fredoka One"] = Font.fromEnum(Enum.Font.FredokaOne) end)
+pcall(function() fontMap["Ubuntu"] = Font.fromEnum(Enum.Font.Ubuntu) end)
+pcall(function() fontMap["Roboto"] = Font.fromEnum(Enum.Font.Roboto) end)
+pcall(function() fontMap["Arial"] = Font.fromEnum(Enum.Font.Arial) end)
+pcall(function() fontMap["Source Sans"] = Font.fromEnum(Enum.Font.SourceSans) end)
+pcall(function() fontMap["Cairo (Arabic)"] = Font.new("rbxassetid://12187377099") end)
+pcall(function() fontMap["Marhey (Arabic)"] = Font.new("rbxassetid://12187364648") end)
+pcall(function() fontMap["Arcade"] = Font.fromEnum(Enum.Font.Arcade) end)
+pcall(function() fontMap["Bangers"] = Font.fromEnum(Enum.Font.Bangers) end)
+pcall(function() fontMap["Creepster"] = Font.fromEnum(Enum.Font.Creepster) end)
+pcall(function() fontMap["Luckiest Guy"] = Font.fromEnum(Enum.Font.LuckiestGuy) end)
+pcall(function() fontMap["Patrick Hand"] = Font.fromEnum(Enum.Font.PatrickHand) end)
+
+local fontGuiConnection = nil
+local UIFontDropdown = nil
+
+local function shouldScaleFontSize(descendant)
+    local parent = descendant.Parent
+    if parent and (parent:IsA("TextButton") or parent:IsA("ImageButton")) then
+        local grandparent = parent.Parent
+        if grandparent and grandparent:IsA("ScrollingFrame") and grandparent.Name == "Tab Scroll" then
+            return false
+        end
+    end
+    return true
+end
+
+local function isMultiLineLabel(descendant)
+    local name = descendant.Name
+    if name == "DescL" or name == "Description" or name == "Status" or name == "Content" then
+        return true
+    end
+    return false
+end
+
+local function applyFontSettings()
+    local selected = splib.Save.SelectedFont or "Default"
+    local isArabicFont = selected:find("Arabic") ~= nil
+    local arabicBaseOffset = isArabicFont and 1 or 0
+    local sizeOffset = splib.Save.FontSizeOffset or 0
+    if fontGuiConnection then
+        pcall(function() fontGuiConnection:Disconnect() end)
+        fontGuiConnection = nil
+    end
+    if not ScreenGui then return end
+    local fontObj = fontMap[selected]
+    if not fontObj then return end
+    for _, descendant in ipairs(ScreenGui:GetDescendants()) do
+        if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+            if fontObj == "Default" then
+                local orig = originalFonts[descendant]
+                if orig then pcall(function() descendant.FontFace = orig end) end
+            else
+                if not originalFonts[descendant] then originalFonts[descendant] = descendant.FontFace end
+                pcall(function() descendant.FontFace = fontObj end)
+            end
+            if not originalTextSizes[descendant] then originalTextSizes[descendant] = descendant.TextSize end
+            if fontObj == "Default" and sizeOffset == 0 then
+                local origSize = originalTextSizes[descendant]
+                if origSize then pcall(function() descendant.TextSize = origSize end) end
+            else
+                local baseSize = originalTextSizes[descendant] or descendant.TextSize
+                local currentOffset = sizeOffset
+                if isArabicFont and shouldScaleFontSize(descendant) then
+                    currentOffset = currentOffset + arabicBaseOffset
+                end
+                pcall(function() descendant.TextSize = math.clamp(baseSize + currentOffset, 7, 26) end)
+            end
+            if fontObj == "Default" then
+                local origLineHeight = originalLineHeights[descendant]
+                if origLineHeight then pcall(function() descendant.LineHeight = origLineHeight end) end
+            else
+                if not originalLineHeights[descendant] then originalLineHeights[descendant] = descendant.LineHeight end
+                if isArabicFont and isMultiLineLabel(descendant) then
+                    pcall(function() descendant.LineHeight = 1.35 end)
+                else
+                    local origLineHeight = originalLineHeights[descendant]
+                    if origLineHeight then pcall(function() descendant.LineHeight = origLineHeight end) end
+                end
+            end
+        end
+    end
+    if fontObj ~= "Default" or sizeOffset ~= 0 then
+        fontGuiConnection = ScreenGui.DescendantAdded:Connect(function(descendant)
+            task.wait()
+            local current = splib.Save.SelectedFont or "Default"
+            local currentFontObj = fontMap[current]
+            local currentIsArabic = current:find("Arabic") ~= nil
+            local currentArabicBaseOffset = currentIsArabic and 1 or 0
+            local currentSizeOffset = splib.Save.FontSizeOffset or 0
+            if (descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox")) then
+                if not originalFonts[descendant] then originalFonts[descendant] = descendant.FontFace end
+                if not originalTextSizes[descendant] then originalTextSizes[descendant] = descendant.TextSize end
+                if not originalLineHeights[descendant] then originalLineHeights[descendant] = descendant.LineHeight end
+                if currentFontObj and currentFontObj ~= "Default" then
+                    pcall(function() descendant.FontFace = currentFontObj end)
+                end
+                local baseSize = originalTextSizes[descendant] or descendant.TextSize
+                local currentOffset = currentSizeOffset
+                if currentIsArabic and shouldScaleFontSize(descendant) then
+                    currentOffset = currentOffset + currentArabicBaseOffset
+                end
+                pcall(function() descendant.TextSize = math.clamp(baseSize + currentOffset, 7, 26) end)
+                if currentIsArabic and isMultiLineLabel(descendant) then
+                    pcall(function() descendant.LineHeight = 1.35 end)
+                else
+                    local origLineHeight = originalLineHeights[descendant]
+                    if origLineHeight then pcall(function() descendant.LineHeight = origLineHeight end) end
+                end
+            end
+        end)
+        trackRuntimeConnection(fontGuiConnection)
+    end
+end
+
+function splib:SetFont(fontName)
+    splib.Save.SelectedFont = fontName
+    SaveJson("sp library.json", splib.Save)
+    if UIFontDropdown then
+        pcall(function() UIFontDropdown:Set(fontName) end)
+    else
+        pcall(applyFontSettings)
+    end
+end
+
+local function GetStr(val)
+	if type(val) == "function" then return val() end
+	return val
+end
+
+local function ConnectSave(Instance, func)
+	Instance.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do task.wait() end
+		end
+		func()
+	end)
+end
+
+local function CreateTween(Configs)
+	local Instance = Configs[1] or Configs.Instance
+	local Prop = Configs[2] or Configs.Prop
+	local NewVal = Configs[3] or Configs.NewVal
+	local Time = Configs[4] or Configs.Time or 0.5
+	local TweenWait = Configs[5] or Configs.wait or false
+	local TweenInfo = TweenInfo.new(Time, Enum.EasingStyle.Quint)
+	local Tween = TweenService:Create(Instance, TweenInfo, {[Prop] = NewVal})
+	Tween:Play()
+	if TweenWait then Tween.Completed:Wait() end
+	return Tween
+end
+
+local function AddDraggingFunctionality(DragPoint, Main)
+    pcall(function()
+        local Dragging, DragInput, MousePos, FramePos = false
+        DragPoint.InputBegan:Connect(function(Input)
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+                Dragging = true
+                MousePos = Input.Position
+                FramePos = Main.Position
+                Input.Changed:Connect(function()
+                    if Input.UserInputState == Enum.UserInputState.End then Dragging = false end
+                end)
+            end
+        end)
+        DragPoint.InputChanged:Connect(function(Input)
+            if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
+                DragInput = Input
+            end
+        end)
+        trackRuntimeConnection(UserInputService.InputChanged:Connect(function(Input)
+            if Input == DragInput and Dragging then
+                local Delta = Input.Position - MousePos
+                TweenService:Create(Main, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Position = UDim2.new(FramePos.X.Scale, FramePos.X.Offset + Delta.X, FramePos.Y.Scale, FramePos.Y.Offset + Delta.Y)
+                }):Play()
+            end
+        end))
+    end)
+end
+
+local function MakeDrag(Instance)
+    SetProps(Instance, { Active = true })
+    if Instance:IsA("GuiButton") then Instance.AutoButtonColor = false end
+    AddDraggingFunctionality(Instance, Instance)
+    return Instance
+end
+
+local function VerifyTheme(Theme)
+	if type(Theme) ~= "string" then return false end
+	for name,_ in pairs(splib.Themes) do
+		if name == Theme then return true end
+	end
+	return false
+end
+
+local function SaveJson(FileName, save)
+	safeWriteJsonFile(FileName, save)
+end
+
+-- ✅ Red -> Gold fallback
+local Theme = splib.Themes[splib.Save.Theme] or splib.Themes.Gold or cloneDefaultTheme()
+
+local function AddEle(Name, Func)
+	splib.Elements[Name] = Func
+end
+
+local function Make(Ele, Instance, props, ...)
+	local Element = splib.Elements[Ele](Instance, props, ...)
+	return Element
+end
+
+AddEle("Corner", function(parent, CornerRadius)
+	local New = SetProps(Create("UICorner", parent, { CornerRadius = CornerRadius or UDim.new(0, 7) }), props)
+	return New
+end)
+
+AddEle("Stroke", function(parent, props, ...)
+	local args = {...}
+	local New = InsertTheme(SetProps(Create("UIStroke", parent, {
+		Color = args[1] or Theme["Color Stroke"],
+		Thickness = args[2] or 1,
+		ApplyStrokeMode = "Border"
+	}), props), "Stroke")
+	return New
+end)
+
+AddEle("Button", function(parent, props, ...)
+	local args = {...}
+	local New = InsertTheme(SetProps(Create("TextButton", parent, {
+		Text = "",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Theme["Color Hub 2"],
+		AutoButtonColor = false
+	}), props), "Frame")
+	New.MouseEnter:Connect(function() New.BackgroundTransparency = 0.4 end)
+	New.MouseLeave:Connect(function() New.BackgroundTransparency = 0 end)
+	if args[1] then New.Activated:Connect(args[1]) end
+	return New
+end)
+
+AddEle("Gradient", function(parent, props, ...)
+	local args = {...}
+	local New = InsertTheme(SetProps(Create("UIGradient", parent, { Color = Theme["Color Hub 1"] }), props), "Gradient")
+	return New
+end)
+
+-- ⚠️ PART 2 burada bitiyor (Translation sistemi, Grid layout, ButtonFrame, GetIcon, SetTheme, MakeWindow, Tab API'leri...)
+-- ⚠️ PART 3'te devam ediyor.
+splib._TranslationItems = splib._TranslationItems or {}
+splib._TranslationIndex = splib._TranslationIndex or setmetatable({}, {__mode = "k"})
+
+local function getTranslationMap()
+    local map = rawget(_G, "SP_Hub_TKeys")
+    if type(map) ~= "table" then
+        map = {}
+        rawset(_G, "SP_Hub_TKeys", map)
+    end
+    return map
+end
+
+local function rememberTranslationAlias(key, text)
+    if key == nil or text == nil then return end
+    local map = getTranslationMap()
+    key = tostring(key)
+    text = tostring(text)
+    if key == "" or text == "" then return end
+    map[key] = key
+    map[text] = key
+end
+
+local function resolveTranslationKey(text)
+    if text == nil then return nil end
+    local map = getTranslationMap()
+    return map[tostring(text)]
+end
+
+local function resolveTranslationKeyWithSuffix(text)
+    if text == nil then return nil, "" end
+    text = tostring(text)
+    local exactKey = resolveTranslationKey(text)
+    if exactKey then return exactKey, "" end
+    local map = getTranslationMap()
+    local bestKey, bestLen = nil, 0
+    for alias, key in pairs(map) do
+        if type(alias) == "string" and alias ~= "" and type(key) == "string" and text:sub(1, #alias) == alias then
+            if #alias > bestLen then bestKey = key; bestLen = #alias end
+        end
+    end
+    if bestKey then return bestKey, text:sub(bestLen + 1) end
+    return nil, ""
+end
+
+local function getLiveTranslation(key)
+    key = tostring(key or "")
+    local translator = rawget(_G, "SP_Hub_Translator")
+    if type(translator) == "function" then
+        local ok, result = pcall(translator, key)
+        if ok and result ~= nil then
+            local translated = tostring(result)
+            rememberTranslationAlias(key, translated)
+            return translated
+        end
+    end
+    rememberTranslationAlias(key, key)
+    return key
+end
+
+local function isTranslatableTextObject(obj)
+    return obj and typeof(obj) == "Instance"
+        and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox"))
+end
+
+local function isAnimatedTextProperty(obj, property)
+    return property == "Text" and isTranslatableTextObject(obj)
+end
+
+local function getTextPropertyValue(obj, property)
+    if not (obj and typeof(obj) == "Instance") then return "" end
+    property = property or "Text"
+    local ok, value = pcall(function() return obj[property] end)
+    if ok and value ~= nil then return tostring(value) end
+    return ""
+end
+
+local function setTextPropertyValue(obj, property, value)
+    if not (obj and typeof(obj) == "Instance") then return end
+    property = property or "Text"
+    pcall(function() obj[property] = tostring(value or "") end)
+end
+
+splib.TranslationAnimation = splib.TranslationAnimation or {
+    Enabled = true, Mode = "Build", Duration = 0.34, FadeOutTime = 0.08,
+    Stagger = 0.010, MaxDelay = 0.24, BuildSteps = 12,
+    MinStepWait = 0.010, MaxStepWait = 0.035, TextFadeAmount = 0.62
+}
+
+function splib:SetTranslationAnimation(config)
+    if type(config) ~= "table" then return end
+    self.TranslationAnimation = self.TranslationAnimation or {}
+    for key, value in pairs(config) do
+        self.TranslationAnimation[key] = value
+    end
+end
+
+local function applyTranslationText(label, newText, refreshCallback, property)
+    if not isTranslatableTextObject(label) then return end
+    setTextPropertyValue(label, property or "Text", newText)
+    if type(refreshCallback) == "function" then task.defer(refreshCallback) end
+end
+
+local function getTranslationAnimationConfig()
+    local cfg = splib.TranslationAnimation
+    if type(cfg) ~= "table" then cfg = {}; splib.TranslationAnimation = cfg end
+    return cfg
+end
+
+local function splitTextGraphemes(text)
+    text = tostring(text or "")
+    local chars = {}
+    local ok = pcall(function()
+        for first, last in utf8.graphemes(text) do
+            table.insert(chars, text:sub(first, last))
+        end
+    end)
+    if ok and #chars > 0 then return chars end
+    for i = 1, #text do chars[#chars + 1] = text:sub(i, i) end
+    return chars
+end
+
+local function joinTextGraphemes(chars, count)
+    count = math.clamp(tonumber(count) or 0, 0, #chars)
+    if count <= 0 then return "" end
+    local out = table.create and table.create(count) or {}
+    for i = 1, count do out[i] = chars[i] end
+    return table.concat(out)
+end
+
+local function animateTranslationLabel(label, newText, refreshCallback, delayTime, property)
+    property = property or "Text"
+    newText = tostring(newText or "")
+    if not isTranslatableTextObject(label) then return end
+    if not isAnimatedTextProperty(label, property) then
+        applyTranslationText(label, newText, refreshCallback, property); return
+    end
+    local currentText = getTextPropertyValue(label, property)
+    local cfg = getTranslationAnimationConfig()
+    if cfg.Enabled == false or currentText == newText then
+        applyTranslationText(label, newText, refreshCallback, property); return
+    end
+    local abs = label.AbsoluteSize
+    if not label.Visible or abs.X <= 2 or abs.Y <= 2 then
+        applyTranslationText(label, newText, refreshCallback, property); return
+    end
+    delayTime = tonumber(delayTime) or 0
+    local duration = tonumber(cfg.Duration) or 0.34
+    local fadeOutTime = tonumber(cfg.FadeOutTime) or 0.08
+    local textFadeAmount = tonumber(cfg.TextFadeAmount) or 0.62
+    local buildSteps = math.max(1, math.floor(tonumber(cfg.BuildSteps) or 12))
+    local minStepWait = tonumber(cfg.MinStepWait) or 0.010
+    local maxStepWait = tonumber(cfg.MaxStepWait) or 0.035
+    task.delay(delayTime, function()
+        if not (label and label.Parent) then return end
+        pcall(function()
+            local oldSweep = label:FindFirstChild("SPTranslateSweep")
+            if oldSweep then oldSweep:Destroy() end
+        end)
+        local token = tostring(os.clock()) .. ":" .. tostring(math.random(1, 999999))
+        pcall(function() label:SetAttribute("SPTranslateToken", token) end)
+        local oldTextTransparency = 0
+        local oldStrokeTransparency = nil
+        pcall(function()
+            oldTextTransparency = label.TextTransparency
+            oldStrokeTransparency = label.TextStrokeTransparency
+        end)
+        local fadedTransparency = math.clamp(oldTextTransparency + textFadeAmount, 0, 1)
+        pcall(function()
+            TweenService:Create(label,
+                TweenInfo.new(math.max(0.02, fadeOutTime), Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { TextTransparency = fadedTransparency }):Play()
+        end)
+        task.wait(math.max(0.02, fadeOutTime))
+        if not (label and label.Parent) then return end
+        local stillSameToken = true
+        pcall(function() stillSameToken = label:GetAttribute("SPTranslateToken") == token end)
+        if not stillSameToken then return end
+        local chars = splitTextGraphemes(newText)
+        local total = #chars
+        if total <= 0 then
+            setTextPropertyValue(label, property, "")
+            pcall(function() label.TextTransparency = oldTextTransparency end)
+            if oldStrokeTransparency ~= nil then
+                pcall(function() label.TextStrokeTransparency = oldStrokeTransparency end)
+            end
+            if type(refreshCallback) == "function" then task.defer(refreshCallback) end
+            return
+        end
+        local steps = math.clamp(math.min(buildSteps, total), 1, 18)
+        local revealTime = math.max(0.06, duration - fadeOutTime)
+        local stepWait = math.clamp(revealTime / steps, minStepWait, maxStepWait)
+        setTextPropertyValue(label, property, "")
+        pcall(function()
+            TweenService:Create(label,
+                TweenInfo.new(revealTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                { TextTransparency = oldTextTransparency }):Play()
+        end)
+        for step = 1, steps do
+            if not (label and label.Parent) then return end
+            local sameToken = true
+            pcall(function() sameToken = label:GetAttribute("SPTranslateToken") == token end)
+            if not sameToken then return end
+            local amount = math.ceil((total * step) / steps)
+            setTextPropertyValue(label, property, joinTextGraphemes(chars, amount))
+            task.wait(stepWait)
+        end
+        if not (label and label.Parent) then return end
+        setTextPropertyValue(label, property, newText)
+        pcall(function() label.TextTransparency = oldTextTransparency end)
+        if oldStrokeTransparency ~= nil then
+            pcall(function() label.TextStrokeTransparency = oldStrokeTransparency end)
+        end
+        if type(refreshCallback) == "function" then task.defer(refreshCallback) end
+    end)
+end
+
+function splib:RegisterTranslationObject(instance, property, sourceText, refreshCallback)
+    if not isTranslatableTextObject(instance) then return end
+    property = property or "Text"
+    local currentText = getTextPropertyValue(instance, property)
+    local item = self._TranslationIndex[instance]
+    local sourceValue = sourceText or currentText
+    local key, detectedSuffix = resolveTranslationKeyWithSuffix(sourceValue)
+    if not item then
+        item = { Instance = instance, Properties = {} }
+        self._TranslationIndex[instance] = item
+        table.insert(self._TranslationItems, item)
+    end
+    local propItem = item.Properties[property]
+    if not propItem then propItem = {}; item.Properties[property] = propItem end
+    if not key then
+        if propItem.Key and type(sourceText) == "string" then
+            local translated = getLiveTranslation(propItem.Key)
+            if translated ~= "" and sourceText:sub(1, #translated) == translated then
+                propItem.Suffix = sourceText:sub(#translated + 1)
+                propItem.Refresh = refreshCallback or propItem.Refresh
+            end
+        end
+        return
+    end
+    local translatedNow = getLiveTranslation(key)
+    local suffix = tostring(detectedSuffix or "")
+    if suffix == "" then
+        if currentText ~= "" and translatedNow ~= "" and currentText:sub(1, #translatedNow) == translatedNow then
+            suffix = currentText:sub(#translatedNow + 1)
+        elseif sourceText and translatedNow ~= "" then
+            local s = tostring(sourceText)
+            if s:sub(1, #translatedNow) == translatedNow then suffix = s:sub(#translatedNow + 1) end
+        end
+    end
+    propItem.Key = key
+    propItem.Suffix = suffix
+    propItem.Refresh = refreshCallback
+    if suffix == "" then rememberTranslationAlias(key, currentText) end
+end
+
+function splib:RegisterTranslationLabel(label, sourceText, refreshCallback)
+    self:RegisterTranslationObject(label, "Text", sourceText, refreshCallback)
+end
+
+function splib:RegisterTranslationPlaceholder(textBox, sourceText, refreshCallback)
+    self:RegisterTranslationObject(textBox, "PlaceholderText", sourceText, refreshCallback)
+end
+
+function splib:RefreshTranslations(options)
+    local animate = true
+    if type(options) == "table" and options.Animate == false then animate = false end
+    local operations = {}
+    local seen = setmetatable({}, {__mode = "k"})
+    local function isSeen(instance, property)
+        local props = seen[instance]
+        if not props then props = {}; seen[instance] = props end
+        if props[property] then return true end
+        props[property] = true
+        return false
+    end
+    local function queue(instance, property, key, suffix, refreshCallback)
+        if not isTranslatableTextObject(instance) then return end
+        property = property or "Text"
+        if isSeen(instance, property) then return end
+        if type(key) ~= "string" or key == "" then return end
+        local translated = getLiveTranslation(key) .. tostring(suffix or "")
+        local currentText = getTextPropertyValue(instance, property)
+        if currentText == translated then
+            if type(refreshCallback) == "function" then task.defer(refreshCallback) end
+            return
+        end
+        table.insert(operations, {Instance = instance, Property = property, Text = translated, Refresh = refreshCallback})
+    end
+    local items = self._TranslationItems
+    if type(items) == "table" then
+        for i = #items, 1, -1 do
+            local item = items[i]
+            local instance = item and (item.Instance or item.Label)
+            if not (instance and typeof(instance) == "Instance" and instance.Parent) then
+                if instance then self._TranslationIndex[instance] = nil end
+                table.remove(items, i)
+            else
+                if item.Properties then
+                    for property, propItem in pairs(item.Properties) do
+                        queue(instance, property, propItem.Key, propItem.Suffix, propItem.Refresh)
+                    end
+                elseif item.Key then
+                    queue(instance, "Text", item.Key, item.Suffix, item.Refresh)
+                end
+            end
+        end
+    end
+    pcall(function()
+        if ScreenGui and ScreenGui.Parent then
+            local function addFromObject(obj)
+                if not isTranslatableTextObject(obj) then return end
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                    local currentText = getTextPropertyValue(obj, "Text")
+                    if currentText ~= "" then
+                        local key, suffix = resolveTranslationKeyWithSuffix(currentText)
+                        if key then queue(obj, "Text", key, suffix, nil) end
+                    end
+                end
+                if obj:IsA("TextBox") then
+                    local placeholder = getTextPropertyValue(obj, "PlaceholderText")
+                    if placeholder ~= "" then
+                        local placeholderKey, placeholderSuffix = resolveTranslationKeyWithSuffix(placeholder)
+                        if placeholderKey then queue(obj, "PlaceholderText", placeholderKey, placeholderSuffix, nil) end
+                    end
+                    local shouldTranslateText = false
+                    pcall(function() shouldTranslateText = obj:GetAttribute("SPTranslateText") == true end)
+                    if shouldTranslateText then
+                        local currentInputText = getTextPropertyValue(obj, "Text")
+                        if currentInputText ~= "" then
+                            local inputKey, inputSuffix = resolveTranslationKeyWithSuffix(currentInputText)
+                            if inputKey then queue(obj, "Text", inputKey, inputSuffix, nil) end
+                        end
+                    end
+                end
+            end
+            addFromObject(ScreenGui)
+            for _, obj in ipairs(ScreenGui:GetDescendants()) do addFromObject(obj) end
+        end
+    end)
+    local cfg = getTranslationAnimationConfig()
+    local stagger = tonumber(cfg.Stagger) or 0.012
+    local maxDelay = tonumber(cfg.MaxDelay) or 0.28
+    for index, op in ipairs(operations) do
+        local delayTime = math.min((index - 1) * stagger, maxDelay)
+        if animate then
+            animateTranslationLabel(op.Instance, op.Text, op.Refresh, delayTime, op.Property)
+        else
+            applyTranslationText(op.Instance, op.Text, op.Refresh, op.Property)
+        end
+    end
+end
+
+local GRID_COLUMN_GAP = isMobile and 6 or 8
+local GRID_NARROW_COLUMN_GAP = isMobile and 4 or 5
+local GRID_COMPACT_CONTAINER_WIDTH = isMobile and 430 or 500
+local GRID_COMPACT_CARD_WIDTH = isMobile and 170 or 190
+local GRID_MIN_WINDOW_WIDTH = isMobile and 410 or 500
+local GRID_MAX_WINDOW_WIDTH = isMobile and 440 or 720
+local GRID_LAYOUT_TWEEN_TIME = 0.30
+splib._ClassicUISizeBeforeGrid = splib._ClassicUISizeBeforeGrid or nil
+local LayoutModeConnections = setmetatable({}, {__mode = "k"})
+
+local function normalizeLayoutMode(mode)
+    return mode == "Grid" and "Grid" or "Classic"
+end
+
+local function getDirectChildOfClass(parent, className)
+    if not parent or typeof(parent) ~= "Instance" then return nil end
+    for _, child in ipairs(parent:GetChildren()) do
+        if child:IsA(className) then return child end
+    end
+    return nil
+end
+
+local function clearLayoutConnections(container)
+    local list = LayoutModeConnections[container]
+    if not list then return end
+    for _, connection in ipairs(list) do
+        pcall(function()
+            if connection and connection.Connected then connection:Disconnect() end
+        end)
+    end
+    LayoutModeConnections[container] = nil
+end
+
+local function bindLayoutConnection(container, connection)
+    if not container or not connection then return end
+    LayoutModeConnections[container] = LayoutModeConnections[container] or {}
+    table.insert(LayoutModeConnections[container], connection)
+    trackRuntimeConnection(connection)
+end
+
+local function reserveLayoutOrder(container)
+    if not container or typeof(container) ~= "Instance" then return 0 end
+    local count = 0
+    pcall(function()
+        count = tonumber(container:GetAttribute("SPLayoutItemCount")) or 0
+        count = count + 1
+        container:SetAttribute("SPLayoutItemCount", count)
+    end)
+    return count
+end
+
+local function getLayoutOrder(item)
+    local order = nil
+    pcall(function() order = tonumber(item:GetAttribute("SPLayoutOrder")) end)
+    if order == nil and item and item:IsA("GuiObject") then order = tonumber(item.LayoutOrder) end
+    return order or 0
+end
+
+local function markLayoutItem(item, kind, order, name)
+    if not item or typeof(item) ~= "Instance" then return end
+    pcall(function()
+        item:SetAttribute("SPLayoutManaged", true)
+        item:SetAttribute("SPLayoutKind", kind)
+        item:SetAttribute("SPLayoutOrder", order or getLayoutOrder(item))
+        if name ~= nil then item:SetAttribute("SPSectionName", tostring(name)) end
+    end)
+end
+
+local function collectManagedLayoutItems(container)
+    local items = {}
+    local seen = {}
+    local function add(item)
+        if not item or seen[item] or not item:IsA("GuiObject") then return end
+        local managed = false
+        pcall(function() managed = item:GetAttribute("SPLayoutManaged") == true end)
+        if managed then seen[item] = true; table.insert(items, item) end
+    end
+    if container and typeof(container) == "Instance" then
+        for _, child in ipairs(container:GetChildren()) do
+            add(child)
+            if child.Name == "ColumnsFrame" then
+                for _, desc in ipairs(child:GetDescendants()) do add(desc) end
+            end
+        end
+    end
+    table.sort(items, function(a, b)
+        local ao = getLayoutOrder(a); local bo = getLayoutOrder(b)
+        if ao == bo then return a.LayoutOrder < b.LayoutOrder end
+        return ao < bo
+    end)
+    return items
+end
+
+local function collectManagedSections(container)
+    local sections = {}
+    for _, item in ipairs(collectManagedLayoutItems(container)) do
+        local kind = nil
+        pcall(function() kind = item:GetAttribute("SPLayoutKind") end)
+        if kind == "Section" then table.insert(sections, item) end
+    end
+    return sections
+end
+
+local function getGridColumnGap(container)
+    local width = 0
+    pcall(function() width = container.AbsoluteSize.X end)
+    if width > 0 and width < GRID_COMPACT_CONTAINER_WIDTH then return GRID_NARROW_COLUMN_GAP end
+    return GRID_COLUMN_GAP
+end
+
+local function isGridCardCompact(card)
+    local width = 0
+    pcall(function() width = card.AbsoluteSize.X end)
+    return width > 0 and width < GRID_COMPACT_CARD_WIDTH
+end
+
+local function setCurrentGridCard(container, card)
+    if not container or typeof(container) ~= "Instance" then return end
+    local currentCardVal = container:FindFirstChild("CurrentSectionCardValue")
+    if not currentCardVal and card then
+        currentCardVal = Create("ObjectValue", container, { Name = "CurrentSectionCardValue" })
+    end
+    if currentCardVal then currentCardVal.Value = card end
+end
+
+local function configureSectionForClassic(sectionFrame)
+    if not sectionFrame or not sectionFrame.Parent then return end
+    sectionFrame.Size = UDim2.new(1, 0, 0, 20)
+    sectionFrame.AutomaticSize = Enum.AutomaticSize.None
+    sectionFrame.BackgroundTransparency = 1
+    sectionFrame.BorderSizePixel = 0
+    sectionFrame.LayoutOrder = getLayoutOrder(sectionFrame)
+    for _, child in ipairs(sectionFrame:GetChildren()) do
+        if child:IsA("UIListLayout") or child:IsA("UIPadding") then
+            child:Destroy()
+        elseif child:IsA("UIStroke") then
+            pcall(function() child.Enabled = false end)
+        elseif child.Name == "Separator" and child:IsA("GuiObject") then
+            child.Visible = false
+        end
+    end
+    local sectionLabel = getDirectChildOfClass(sectionFrame, "TextLabel")
+    if sectionLabel then
+        sectionLabel.Name = "SectionTitle"
+        sectionLabel.Size = UDim2.new(1, -25, 1, 0)
+        sectionLabel.Position = UDim2.new(0, 5, 0, 0)
+        sectionLabel.AutomaticSize = Enum.AutomaticSize.None
+        sectionLabel.TextSize = isMobile and 9 or 14
+        sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+        sectionLabel.TextYAlignment = Enum.TextYAlignment.Center
+        sectionLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        sectionLabel.LayoutOrder = 0
+    end
+end
+
+local function configureSectionForGrid(sectionFrame)
+    if not sectionFrame then return end
+    local sectionName = sectionFrame:GetAttribute("SPSectionName") or sectionFrame.Name or "Section"
+    sectionFrame.Name = tostring(sectionName) .. "_SectionCard"
+    sectionFrame.Size = UDim2.new(1, 0, 0, 0)
+    sectionFrame.AutomaticSize = Enum.AutomaticSize.Y
+    sectionFrame.BackgroundTransparency = 0
+    sectionFrame.BackgroundColor3 = Theme["Color Hub 2"] or Color3.fromRGB(30, 30, 30)
+    sectionFrame.BorderSizePixel = 0
+    sectionFrame:SetAttribute("ElementCount", 0)
+    if not getDirectChildOfClass(sectionFrame, "UICorner") then
+        Make("Corner", sectionFrame, UDim.new(0, 8))
+    end
+    local stroke = getDirectChildOfClass(sectionFrame, "UIStroke")
+    if not stroke then
+        stroke = Make("Stroke", sectionFrame, {
+            Color = Theme["Color Stroke"] or Color3.fromRGB(15, 15, 15),
+            Thickness = 1, ApplyStrokeMode = "Border"
+        })
+    end
+    pcall(function() stroke.Enabled = true; stroke.Transparency = 0 end)
+    local listLayout = getDirectChildOfClass(sectionFrame, "UIListLayout")
+    if not listLayout then listLayout = Create("UIListLayout", sectionFrame) end
+    listLayout.Name = "SPSectionLayout"
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 6)
+    local padding = getDirectChildOfClass(sectionFrame, "UIPadding")
+    if not padding then padding = Create("UIPadding", sectionFrame) end
+    padding.PaddingTop = UDim.new(0, 8)
+    padding.PaddingBottom = UDim.new(0, 8)
+    padding.PaddingLeft = UDim.new(0, 10)
+    padding.PaddingRight = UDim.new(0, 10)
+    local sectionLabel = getDirectChildOfClass(sectionFrame, "TextLabel")
+    if sectionLabel then
+        sectionLabel.Name = "SectionTitle"
+        sectionLabel.Size = UDim2.new(1, 0, 0, 20)
+        sectionLabel.Position = UDim2.new(0, 0, 0, 0)
+        sectionLabel.AutomaticSize = Enum.AutomaticSize.None
+        sectionLabel.TextSize = isMobile and 10 or 12
+        sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+        sectionLabel.TextYAlignment = Enum.TextYAlignment.Center
+        sectionLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        sectionLabel.LayoutOrder = 0
+    end
+    local separator = sectionFrame:FindFirstChild("Separator")
+    if not separator then
+        separator = InsertTheme(Create("Frame", sectionFrame, {
+            Name = "Separator",
+            BorderSizePixel = 0,
+            BackgroundColor3 = Theme["Color Stroke"] or Color3.fromRGB(15, 15, 15)
+        }), "Stroke")
+    end
+    separator.Visible = true
+    separator.Size = UDim2.new(1, 0, 0, 1)
+    separator.LayoutOrder = 1
+
+    local function refreshSectionGridDensity()
+        if not sectionFrame or not sectionFrame.Parent or sectionFrame.AutomaticSize ~= Enum.AutomaticSize.Y then return end
+        local compact = isGridCardCompact(sectionFrame)
+        local currentLayout = getDirectChildOfClass(sectionFrame, "UIListLayout")
+        local currentPadding = getDirectChildOfClass(sectionFrame, "UIPadding")
+        local currentTitle = getDirectChildOfClass(sectionFrame, "TextLabel")
+        if currentLayout then currentLayout.Padding = UDim.new(0, compact and 4 or 5) end
+        if currentPadding then
+            local sidePadding = compact and 5 or 8
+            currentPadding.PaddingTop = UDim.new(0, compact and 6 or 8)
+            currentPadding.PaddingBottom = UDim.new(0, compact and 6 or 8)
+            currentPadding.PaddingLeft = UDim.new(0, sidePadding)
+            currentPadding.PaddingRight = UDim.new(0, sidePadding)
+        end
+        if currentTitle then
+            currentTitle.TextSize = compact and (isMobile and 9 or 11) or (isMobile and 10 or 12)
+        end
+    end
+    refreshSectionGridDensity()
+    if sectionFrame:GetAttribute("SPGridDensityBound") ~= true then
+        sectionFrame:SetAttribute("SPGridDensityBound", true)
+        trackRuntimeConnection(sectionFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(refreshSectionGridDensity))
+    end
+end
+
+local function getPaddingOffset(padding, axis)
+    if not padding or not padding:IsA("UIPadding") then return 0 end
+    local total = 0
+    pcall(function()
+        if axis == "Y" then total = padding.PaddingTop.Offset + padding.PaddingBottom.Offset
+        else total = padding.PaddingLeft.Offset + padding.PaddingRight.Offset end
+    end)
+    return total
+end
+
+local function getListPaddingOffset(listLayout)
+    if not listLayout or not listLayout:IsA("UIListLayout") then return 0 end
+    local value = 0
+    pcall(function() value = listLayout.Padding.Offset end)
+    return value
+end
+
+local function estimateGridSectionHeight(sectionFrame)
+    if not sectionFrame or not sectionFrame:IsA("GuiObject") then return 0 end
+    local measured = 0
+    pcall(function() measured = sectionFrame.AbsoluteSize.Y end)
+    if measured and measured > 8 then return measured end
+    local listLayout = getDirectChildOfClass(sectionFrame, "UIListLayout")
+    local padding = getDirectChildOfClass(sectionFrame, "UIPadding")
+    pcall(function()
+        if listLayout then measured = math.max(measured, listLayout.AbsoluteContentSize.Y + getPaddingOffset(padding, "Y")) end
+    end)
+    if measured and measured > 8 then return measured end
+    local children = {}
+    for _, child in ipairs(sectionFrame:GetChildren()) do
+        if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") and not child:IsA("UICorner") and not child:IsA("UIStroke") then
+            table.insert(children, child)
+        end
+    end
+    table.sort(children, function(a, b)
+        if a.LayoutOrder == b.LayoutOrder then return a.Name < b.Name end
+        return a.LayoutOrder < b.LayoutOrder
+    end)
+    local spacing = getListPaddingOffset(listLayout)
+    local total = getPaddingOffset(padding, "Y")
+    local visibleCount = 0
+    for _, child in ipairs(children) do
+        if child.Visible ~= false then
+            visibleCount += 1
+            local childHeight = 0
+            pcall(function() childHeight = math.max(child.AbsoluteSize.Y, child.Size.Y.Offset) end)
+            if childHeight <= 0 then childHeight = 28 end
+            total += childHeight
+        end
+    end
+    if visibleCount > 1 then total += spacing * (visibleCount - 1) end
+    return math.max(total, 48)
+end
+
+local function distributeGridSections(container, leftColumn, rightColumn)
+    if not container or not leftColumn or not rightColumn then return nil end
+    local sections = collectManagedSections(container)
+    local lastSection = nil
+    local leftHeight = 0; local rightHeight = 0
+    local leftCount = 0; local rightCount = 0
+    local leftLayout = getDirectChildOfClass(leftColumn, "UIListLayout")
+    local rightLayout = getDirectChildOfClass(rightColumn, "UIListLayout")
+    local leftGap = getListPaddingOffset(leftLayout)
+    local rightGap = getListPaddingOffset(rightLayout)
+    rightColumn.Visible = true
+    for index, section in ipairs(sections) do
+        local sectionHeight = estimateGridSectionHeight(section)
+        local targetColumn
+        if index == 1 then targetColumn = leftColumn
+        elseif leftCount == 0 then targetColumn = leftColumn
+        elseif rightCount == 0 then targetColumn = rightColumn
+        elseif leftHeight <= rightHeight then targetColumn = leftColumn
+        else targetColumn = rightColumn end
+        if section.Parent ~= targetColumn then section.Parent = targetColumn end
+        if section.LayoutOrder ~= index then section.LayoutOrder = index end
+        lastSection = section
+        if targetColumn == leftColumn then
+            if leftCount > 0 then leftHeight += leftGap end
+            leftHeight += sectionHeight; leftCount += 1
+        else
+            if rightCount > 0 then rightHeight += rightGap end
+            rightHeight += sectionHeight; rightCount += 1
+        end
+    end
+    setCurrentGridCard(container, lastSection)
+    container:SetAttribute("SectionCount", #sections)
+    container:SetAttribute("SPGridLeftHeightEstimate", math.floor(leftHeight + 0.5))
+    container:SetAttribute("SPGridRightHeightEstimate", math.floor(rightHeight + 0.5))
+    return false
+end
+
+local function ensureGridColumns(container)
+    if not container or typeof(container) ~= "Instance" then return nil end
+    local columnsFrame = container:FindFirstChild("ColumnsFrame")
+    if not columnsFrame then
+        columnsFrame = Create("Frame", container, {
+            Name = "ColumnsFrame", Size = UDim2.new(1, 0, 0, 0),
+            BackgroundTransparency = 1, LayoutOrder = 1
+        })
+    end
+    local columnsLayout = getDirectChildOfClass(columnsFrame, "UIListLayout")
+    if not columnsLayout then columnsLayout = Create("UIListLayout", columnsFrame) end
+    columnsLayout.Name = "ColumnsLayout"
+    columnsLayout.Padding = UDim.new(0, GRID_COLUMN_GAP)
+    columnsLayout.FillDirection = Enum.FillDirection.Horizontal
+    columnsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    local leftColumn = columnsFrame:FindFirstChild("LeftColumn")
+    if not leftColumn then
+        leftColumn = Create("Frame", columnsFrame, { Name = "LeftColumn", BackgroundTransparency = 1, LayoutOrder = 1 })
+    end
+    local leftLayout = getDirectChildOfClass(leftColumn, "UIListLayout")
+    if not leftLayout then leftLayout = Create("UIListLayout", leftColumn) end
+    leftLayout.Name = "LeftLayout"
+    leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    leftLayout.Padding = UDim.new(0, 6)
+    local rightColumn = columnsFrame:FindFirstChild("RightColumn")
+    if not rightColumn then
+        rightColumn = Create("Frame", columnsFrame, { Name = "RightColumn", BackgroundTransparency = 1, LayoutOrder = 2 })
+    end
+    local rightLayout = getDirectChildOfClass(rightColumn, "UIListLayout")
+    if not rightLayout then rightLayout = Create("UIListLayout", rightColumn) end
+    rightLayout.Name = "RightLayout"
+    rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    rightLayout.Padding = UDim.new(0, 6)
+    local function updateColumnSizes()
+        local gap = getGridColumnGap(container)
+        columnsLayout.Padding = UDim.new(0, gap)
+        rightColumn.Visible = true
+        leftColumn.Size = UDim2.new(0.5, -math.ceil(gap * 0.5), 0, leftLayout.AbsoluteContentSize.Y)
+        rightColumn.Size = UDim2.new(0.5, -math.floor(gap * 0.5), 0, rightLayout.AbsoluteContentSize.Y)
+        columnsFrame.Size = UDim2.new(1, 0, 0, math.max(leftLayout.AbsoluteContentSize.Y, rightLayout.AbsoluteContentSize.Y))
+    end
+    local isRefreshingGrid = false
+    local function refreshGrid()
+        if isRefreshingGrid then return end
+        if not columnsFrame.Parent then return end
+        isRefreshingGrid = true
+        distributeGridSections(container, leftColumn, rightColumn)
+        updateColumnSizes()
+        task.defer(function() pcall(updateColumnSizes); isRefreshingGrid = false end)
+    end
+    clearLayoutConnections(container)
+    bindLayoutConnection(container, leftLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshGrid))
+    bindLayoutConnection(container, rightLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(refreshGrid))
+    bindLayoutConnection(container, container:GetPropertyChangedSignal("AbsoluteSize"):Connect(refreshGrid))
+    refreshGrid()
+    return columnsFrame, leftColumn, rightColumn
+end
+
+local function animateGridBuild(container)
+    if not isPC or not container or typeof(container) ~= "Instance" then return end
+    local items = collectManagedLayoutItems(container)
+    local visibleIndex = 0
+    for _, item in ipairs(items) do
+        if item and item:IsA("GuiObject") and item.Parent and item.Visible ~= false then
+            visibleIndex += 1
+            local originalTransparency = item.BackgroundTransparency
+            local scaleObj = item:FindFirstChild("SPGridBuildScale")
+            if not scaleObj then scaleObj = Create("UIScale", item, { Name = "SPGridBuildScale", Scale = 1 }) end
+            local delayTime = math.min((visibleIndex - 1) * 0.018, 0.18)
+            pcall(function()
+                scaleObj.Scale = 0.965
+                item.BackgroundTransparency = math.clamp(originalTransparency + 0.28, 0, 1)
+            end)
+            task.delay(delayTime, function()
+                if not item or not item.Parent then return end
+                pcall(function()
+                    TweenService:Create(scaleObj, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+                    TweenService:Create(item, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = originalTransparency}):Play()
+                end)
+            end)
+        end
+    end
+end
+
+local function resolveElementParent(container)
+    local globalOrder = reserveLayoutOrder(container)
+    local actualParent = container
+    local layoutOrder = globalOrder
+    pcall(function()
+        if container and typeof(container) == "Instance" and container:GetAttribute("SPLayoutMode") == "Grid" then
+            local currentCardVal = container:FindFirstChild("CurrentSectionCardValue")
+            local card = currentCardVal and currentCardVal.Value
+            if card and typeof(card) == "Instance" and card.Parent then
+                actualParent = card
+                local count = tonumber(card:GetAttribute("ElementCount")) or 0
+                count = count + 1
+                card:SetAttribute("ElementCount", count)
+                layoutOrder = count + 2
+            end
+        end
+    end)
+    return actualParent, layoutOrder, globalOrder
+end
+
+local function applyLayoutModeToContainer(container, mode)
+    if not container or typeof(container) ~= "Instance" then return end
+    mode = normalizeLayoutMode(mode)
+    local previousMode = normalizeLayoutMode(container:GetAttribute("SPLayoutMode") or splib.Save.LayoutMode or "Classic")
+    local items = collectManagedLayoutItems(container)
+    container:SetAttribute("SPLayoutMode", mode)
+    if mode == "Grid" then
+        local columnsFrame, leftColumn, rightColumn = ensureGridColumns(container)
+        local currentSection = nil
+        for _, item in ipairs(items) do
+            local kind = item:GetAttribute("SPLayoutKind")
+            if kind == "Section" then
+                configureSectionForGrid(item)
+                item.Parent = leftColumn
+                currentSection = item
+            else
+                if currentSection and currentSection.Parent then
+                    item.Parent = currentSection
+                    item:SetAttribute("SPGridElement", true)
+                    local count = tonumber(currentSection:GetAttribute("ElementCount")) or 0
+                    count = count + 1
+                    currentSection:SetAttribute("ElementCount", count)
+                    item.LayoutOrder = count + 2
+                else
+                    item.Parent = container
+                    item:SetAttribute("SPGridElement", false)
+                    item.LayoutOrder = getLayoutOrder(item)
+                end
+            end
+        end
+        distributeGridSections(container, leftColumn, rightColumn)
+        if columnsFrame then
+            task.defer(function()
+                if columnsFrame.Parent then
+                    distributeGridSections(container, leftColumn, rightColumn)
+                    if previousMode ~= "Grid" then animateGridBuild(container) end
+                end
+            end)
+        elseif previousMode ~= "Grid" then
+            task.defer(function() animateGridBuild(container) end)
+        end
+    else
+        setCurrentGridCard(container, nil)
+        clearLayoutConnections(container)
+        for _, item in ipairs(items) do
+            local kind = item:GetAttribute("SPLayoutKind")
+            item.Parent = container
+            item:SetAttribute("SPGridElement", false)
+            item.LayoutOrder = getLayoutOrder(item)
+            if kind == "Section" then configureSectionForClassic(item) end
+        end
+        local columnsFrame = container:FindFirstChild("ColumnsFrame")
+        if columnsFrame then columnsFrame:Destroy() end
+        container:SetAttribute("SectionCount", 0)
+        if previousMode == "Grid" then
+            task.defer(function() animateGridBuild(container) end)
+        end
+    end
+end
+
+local function applyLayoutModeToAllTabs(mode)
+    mode = normalizeLayoutMode(mode)
+    for _, tabInfo in ipairs(splib.Tabs) do
+        local container = tabInfo and tabInfo.Cont
+        if container and container.Name ~= "SettingsTab" then
+            applyLayoutModeToContainer(container, mode)
+        end
+    end
+end
+
+local bindGridControlTooltip
